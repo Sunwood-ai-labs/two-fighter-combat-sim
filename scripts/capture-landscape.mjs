@@ -6,14 +6,14 @@ import { chromium } from "playwright";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = path.resolve(
-  process.argv[2] ?? path.join(projectRoot, "..", "videos", "night-vector-launch", "renders", "two-fighter-combat-capture-20260815"),
+  process.argv[2] ?? path.join(projectRoot, "..", "videos", "night-vector-launch", "renders", "two-fighter-combat-capture"),
 );
 const captureSeconds = Number(process.argv[3] ?? 32);
 const offlineCaptureMode = process.argv.includes("--offline");
 const sourceUrlArg = process.argv.find((argument) => argument.startsWith("--source-url="));
 const sourceUrlValue = sourceUrlArg
   ? sourceUrlArg.slice("--source-url=".length)
-  : "https://madesk.tail8be30.ts.net:9146/two-fighter-combat-dogfight-20260815/";
+  : "http://127.0.0.1:4191/";
 const sourceUrlObject = new URL(sourceUrlValue);
 sourceUrlObject.searchParams.set("capture", "1");
 if (offlineCaptureMode) sourceUrlObject.searchParams.set("offline", "1");

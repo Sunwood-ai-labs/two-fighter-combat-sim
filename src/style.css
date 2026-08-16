@@ -53,7 +53,7 @@ body { min-width: 320px; }
 .event-row b { font-weight: 400; }
 .event-row--accent b { color: #fff0c4; }
 
-.tactical-readout { right: 36px; bottom: 92px; min-width: 520px; padding: 12px 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; border-right: 1px solid rgba(224, 252, 255, .72); background: linear-gradient(270deg, rgba(13, 57, 75, .5), rgba(13, 57, 75, 0)); backdrop-filter: blur(3px); }
+.tactical-readout { right: 36px; bottom: 92px; min-width: 640px; padding: 12px 16px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; border-right: 1px solid rgba(224, 252, 255, .72); background: linear-gradient(270deg, rgba(13, 57, 75, .5), rgba(13, 57, 75, 0)); backdrop-filter: blur(3px); }
 .tactical-readout div { display: flex; flex-direction: column; gap: 5px; }
 .tactical-readout span { font-family: 'Space Mono', monospace; font-size: 8px; letter-spacing: .08em; color: rgba(240, 255, 255, .64); }
 .tactical-readout strong { font-family: 'Space Mono', monospace; font-size: 12px; letter-spacing: .04em; color: #fff0c4; white-space: nowrap; }

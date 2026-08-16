@@ -33,6 +33,7 @@ type CombatPhase =
 type TacticalState = 'SEARCH' | 'TRACK' | 'IDENTIFIED' | 'COMMIT' | 'ENGAGED' | 'DEFENSIVE' | 'EXTEND' | 'SEPARATE' | 'REATTACK' | 'KILLED';
 type TrackQuality = 'NONE' | 'CONTACT' | 'TRACK' | 'ID';
 type FighterRole = 'ENGAGED' | 'DEFENSIVE' | 'SEPARATE';
+type RulesOfEngagement = 'WEAPONS HOLD' | 'PID CONFIRM' | 'WEAPONS FREE' | 'CEASE FIRE';
 
 interface TrackState {
   quality: TrackQuality;
@@ -84,7 +85,13 @@ interface FighterRig {
   extensionUntil: number;
   evasionSign: number;
   lastShotAt: number;
-  energyMps2: number;
+  previousVelocity: THREE.Vector3;
+  specificEnergyM2S2: number;
+  mach: number;
+  dynamicPressurePa: number;
+  angleOfAttackDeg: number;
+  loadFactorG: number;
+  actualAccelerationMps2: number;
   color: number;
   muzzleLocal: THREE.Vector3;
   body?: RigidBody;
@@ -137,10 +144,17 @@ const RIGHT = new THREE.Vector3(1, 0, 0);
 const WORLD_UNIT_METERS = 10;
 const GRAVITY_MPS2 = 9.81;
 const AIR_DENSITY_KG_M3 = 1.225;
+const SEA_LEVEL_SOUND_SPEED_MPS = 340.3;
 const FIGHTER_MASS_KG = 12_000;
 const WING_AREA_M2 = 52;
+const WING_ASPECT_RATIO = 5.5;
+const WING_EFFICIENCY = 0.78;
+const PARASITE_DRAG_COEFFICIENT = 0.025;
+const SIDE_SLIP_DRAG_COEFFICIENT = 0.035;
+const CRITICAL_ANGLE_OF_ATTACK_RAD = THREE.MathUtils.degToRad(18);
 const MAX_THRUST_N = 175_000;
 const MAX_TORQUE_NM = 18_000_000;
+const MAX_LOAD_FACTOR_G = 8;
 const PHYSICS_DT = 1 / 120;
 const MAX_PHYSICS_STEPS_PER_FRAME = 32;
 const MAX_OFFLINE_STEPS_PER_SEEK = 5000;
@@ -160,6 +174,7 @@ const RADAR_ID_RANGE_WORLD = 620;
 const SENSOR_CONTACT_TIME = 0.35;
 const SENSOR_TRACK_TIME = 1.0;
 const SENSOR_ID_TIME = 1.8;
+const PID_CONFIRM_HOLD_TIME = 0.65;
 const BVR_COMMIT_RANGE_WORLD = 500;
 const MERGE_RANGE_WORLD = 130;
 const WVR_RANGE_WORLD = 78;
@@ -200,6 +215,19 @@ function forceFromNewtons(force: THREE.Vector3): THREE.Vector3 {
 
 function torqueFromNewtonMeters(torque: THREE.Vector3): THREE.Vector3 {
   return torque.multiplyScalar(1 / (WORLD_UNIT_METERS * WORLD_UNIT_METERS));
+}
+
+function airDensityAtAltitude(altitudeMeters: number): number {
+  // ISA troposphere approximation, clamped to the band used by this scene.
+  // The visual arena is intentionally low-altitude; this keeps q consistent
+  // with the 10 m/world-unit scale instead of silently using sea-level density.
+  const altitude = THREE.MathUtils.clamp(altitudeMeters, 0, 11_000);
+  return AIR_DENSITY_KG_M3 * Math.pow(1 - 2.25577e-5 * altitude, 4.25588);
+}
+
+function speedOfSoundAtAltitude(altitudeMeters: number): number {
+  const altitude = THREE.MathUtils.clamp(altitudeMeters, 0, 11_000);
+  return SEA_LEVEL_SOUND_SPEED_MPS * Math.sqrt(1 - 0.0000225577 * altitude);
 }
 
 const scene = new THREE.Scene();
@@ -403,7 +431,13 @@ function createNightRig(): FighterRig {
     extensionUntil: 0,
     evasionSign: 1,
     lastShotAt: -Infinity,
-    energyMps2: 0,
+    previousVelocity: new THREE.Vector3(),
+    specificEnergyM2S2: 0,
+    mach: 0,
+    dynamicPressurePa: 0,
+    angleOfAttackDeg: 0,
+    loadFactorG: 1,
+    actualAccelerationMps2: 0,
     color: 0xff2d8d,
     muzzleLocal: new THREE.Vector3(0, -0.08, 7.25),
   };
@@ -467,7 +501,13 @@ function createAethelRig(): FighterRig {
     extensionUntil: 0,
     evasionSign: -1,
     lastShotAt: -Infinity,
-    energyMps2: 0,
+    previousVelocity: new THREE.Vector3(),
+    specificEnergyM2S2: 0,
+    mach: 0,
+    dynamicPressurePa: 0,
+    angleOfAttackDeg: 0,
+    loadFactorG: 1,
+    actualAccelerationMps2: 0,
     color: 0x00b8d4,
     muzzleLocal: new THREE.Vector3(0, 0.05, 9.4),
   };
@@ -575,7 +615,7 @@ function phaseAt(rangeWorld: number, closingWorld: number, incoming: number): Co
   if (missionOutcome === 'SEPARATED') return 'SEPARATE';
   if (!firstShotFired) {
     if (night.track.quality === 'ID' && aethel.track.quality === 'ID') {
-      return rangeWorld <= BVR_COMMIT_RANGE_WORLD ? 'COMMIT' : 'IDENTIFY';
+      return rangeWorld <= BVR_COMMIT_RANGE_WORLD && roeStatus === 'WEAPONS FREE' ? 'COMMIT' : 'IDENTIFY';
     }
     if (trackQualityRank(night.track.quality) > 0 || trackQualityRank(aethel.track.quality) > 0) return 'TRACK';
     return 'SEARCH';
@@ -650,6 +690,7 @@ function updateTacticalDoctrine() {
   const range = night.position.distanceTo(aethel.position);
   const line = aethel.position.clone().sub(night.position).normalize();
   const closing = -aethel.velocity.clone().sub(night.velocity).dot(line);
+  updateRulesOfEngagement(range);
   if (mergeOnly && !Number.isFinite(mergeStartedAt)) {
     mergeStartedAt = simTime;
     addEvent('TACTICAL // BVR DEFEATED // VISUAL MERGE', true);
@@ -699,7 +740,7 @@ function updateTacticalDoctrine() {
       continue;
     }
     if (!firstShotFired) {
-      if (rig.track.quality === 'ID' && range <= BVR_COMMIT_RANGE_WORLD && rig.id === fireAuthority) {
+      if (rig.track.quality === 'ID' && range <= BVR_COMMIT_RANGE_WORLD && rig.id === fireAuthority && roeStatus === 'WEAPONS FREE') {
         rig.role = 'ENGAGED';
         setTacticalState(rig, 'COMMIT', 'COMMIT // WEAPON WINDOW');
       } else if (rig.track.quality === 'ID') {
@@ -751,8 +792,15 @@ function resetRig(rig: FighterRig) {
   rig.initialForward.copy(initialForward);
   rig.forward.copy(rig.initialForward);
   rig.velocity.copy(rig.forward).multiplyScalar(worldVelocityFromMetersPerSecond(220));
+  rig.previousVelocity.copy(rig.velocity);
   rig.speed = rig.velocity.length();
-  rig.energyMps2 = metersPerSecondFromWorldVelocity(rig.speed);
+  const resetSpeedMps = metersPerSecondFromWorldVelocity(rig.speed);
+  rig.specificEnergyM2S2 = 0.5 * resetSpeedMps * resetSpeedMps + GRAVITY_MPS2 * start.y * WORLD_UNIT_METERS;
+  rig.mach = resetSpeedMps / speedOfSoundAtAltitude(start.y * WORLD_UNIT_METERS);
+  rig.dynamicPressurePa = 0;
+  rig.angleOfAttackDeg = 0;
+  rig.loadFactorG = 1;
+  rig.actualAccelerationMps2 = 0;
   rig.bank = 0;
   rig.health = 100;
   rig.hitFlash = 0;
@@ -773,7 +821,6 @@ function resetRig(rig: FighterRig) {
   rig.extensionUntil = 0;
   rig.evasionSign = rig.id === 'night' ? 1 : -1;
   rig.lastShotAt = -Infinity;
-  rig.energyMps2 = metersPerSecondFromWorldVelocity(rig.speed);
   rig.debugTargetDirection.set(0, 0, 1);
   rig.debugFlightPathTarget.set(0, 0, 1);
   rig.debugManeuverAcceleration = 0;
@@ -830,6 +877,38 @@ let mergeOnly = false;
 let mergeStartedAt = Infinity;
 let wvrStartedAt = Infinity;
 let missionOutcome: 'ACTIVE' | 'SEPARATED' | 'KILL' = 'ACTIVE';
+let roeStatus: RulesOfEngagement = 'WEAPONS HOLD';
+let lastRoeStatus: RulesOfEngagement = 'WEAPONS HOLD';
+let pidConfirmedAt = Infinity;
+let cameraMode = 'TACTICAL BOTH';
+
+function updateRulesOfEngagement(rangeWorld: number) {
+  const bothIdentified = night.track.quality === 'ID' && aethel.track.quality === 'ID';
+  if (!bothIdentified) pidConfirmedAt = Infinity;
+  else if (!Number.isFinite(pidConfirmedAt)) {
+    pidConfirmedAt = simTime;
+    addEvent('SENSOR // PID CONFIRMED // HOSTILE IDENTIFIED', true);
+  }
+
+  const nextStatus: RulesOfEngagement = missionOutcome !== 'ACTIVE'
+    ? 'CEASE FIRE'
+    : mergeOnly
+      ? 'WEAPONS HOLD'
+    : !bothIdentified
+      ? 'WEAPONS HOLD'
+      : simTime - pidConfirmedAt < PID_CONFIRM_HOLD_TIME
+        ? 'PID CONFIRM'
+        : rangeWorld <= BVR_COMMIT_RANGE_WORLD
+          ? 'WEAPONS FREE'
+          : 'PID CONFIRM';
+  if (nextStatus !== roeStatus) {
+    roeStatus = nextStatus;
+    if (roeStatus !== lastRoeStatus) {
+      addEvent(`ROE // ${roeStatus}`, roeStatus === 'WEAPONS FREE');
+      lastRoeStatus = roeStatus;
+    }
+  }
+}
 
 function resetSimulation() {
   simTime = 0;
@@ -841,6 +920,10 @@ function resetSimulation() {
   mergeStartedAt = Infinity;
   wvrStartedAt = Infinity;
   missionOutcome = 'ACTIVE';
+  roeStatus = 'WEAPONS HOLD';
+  lastRoeStatus = 'WEAPONS HOLD';
+  pidConfirmedAt = Infinity;
+  cameraMode = 'TACTICAL BOTH';
   cameraViewDirection.set(0, 0, 1);
   resetTransientFx();
   resetRig(night);
@@ -936,6 +1019,9 @@ function updateFlight(rig: FighterRig, other: FighterRig, time: number, delta: n
   const velocity = new THREE.Vector3(rapierVelocity.x, rapierVelocity.y, rapierVelocity.z);
   const speedWorld = velocity.length();
   const speedMps = metersPerSecondFromWorldVelocity(speedWorld);
+  const altitudeMeters = Math.max(0, currentPosition.y * WORLD_UNIT_METERS);
+  const airDensity = airDensityAtAltitude(altitudeMeters);
+  const speedOfSound = speedOfSoundAtAltitude(altitudeMeters);
   const velocityDirection = speedWorld > 0.01 ? velocity.clone().normalize() : forward.clone();
   const targetDirection = targetPosition.sub(currentPosition);
   if (targetDirection.lengthSq() > 0.01) targetDirection.normalize();
@@ -957,7 +1043,9 @@ function updateFlight(rig: FighterRig, other: FighterRig, time: number, delta: n
       turnAxis.copy(right);
     }
     turnAxis.normalize();
-    const maxTurnRate = THREE.MathUtils.clamp((GRAVITY_MPS2 * 10.5) / Math.max(speedMps, 80), 0.12, 0.68);
+    const loadLimitedTurnRate = (GRAVITY_MPS2 * MAX_LOAD_FACTOR_G) / Math.max(speedMps, 80);
+    const controllerTurnRate = rig.turnRate * 1.4;
+    const maxTurnRate = THREE.MathUtils.clamp(Math.min(loadLimitedTurnRate, controllerTurnRate), 0.12, 0.68);
     const allowedAngle = Math.min(requestedAngle, maxTurnRate * delta * 1.8);
     flightPathTarget.copy(velocityDirection).applyAxisAngle(turnAxis, allowedAngle).normalize();
   }
@@ -985,11 +1073,17 @@ function updateFlight(rig: FighterRig, other: FighterRig, time: number, delta: n
   const longitudinalSpeed = Math.max(Math.abs(localVelocity.z), 0.1);
   const angleOfAttack = Math.atan2(-localVelocity.y, longitudinalSpeed);
   const sideslip = Math.atan2(localVelocity.x, longitudinalSpeed);
-  const dynamicPressure = 0.5 * AIR_DENSITY_KG_M3 * speedMps * speedMps;
-  const stallRatio = THREE.MathUtils.clamp((speedMps - STALL_SPEED_MPS) / STALL_SPEED_MPS, 0, 1);
-  const stallDrop = 0.35 + stallRatio * 0.65;
+  const dynamicPressure = 0.5 * airDensity * speedMps * speedMps;
+  const angleRatio = Math.abs(angleOfAttack) / CRITICAL_ANGLE_OF_ATTACK_RAD;
+  const stallDrop = THREE.MathUtils.clamp(1 - Math.max(0, angleRatio - 0.78) * 2.6, 0.2, 1);
   const liftCoefficient = THREE.MathUtils.clamp(0.08 + angleOfAttack * 1.8, -0.35, 0.85) * stallDrop;
-  const dragCoefficient = 0.025 + 0.075 * liftCoefficient * liftCoefficient + 0.035 * Math.abs(sideslip);
+  const inducedDragCoefficient = (liftCoefficient * liftCoefficient) / (Math.PI * WING_ASPECT_RATIO * WING_EFFICIENCY);
+  const dragCoefficient = PARASITE_DRAG_COEFFICIENT
+    + inducedDragCoefficient
+    + SIDE_SLIP_DRAG_COEFFICIENT * Math.abs(sideslip);
+  rig.dynamicPressurePa = dynamicPressure;
+  rig.angleOfAttackDeg = THREE.MathUtils.radToDeg(angleOfAttack);
+  rig.mach = speedMps / Math.max(speedOfSound, 1);
   const liftDirection = up.clone().sub(velocityDirection.clone().multiplyScalar(up.dot(velocityDirection)));
   if (liftDirection.lengthSq() > 0.001) liftDirection.normalize();
   else liftDirection.copy(up);
@@ -1022,8 +1116,8 @@ function updateFlight(rig: FighterRig, other: FighterRig, time: number, delta: n
     const requestedAcceleration = speedMps * maneuverAngle / Math.max(delta, 1 / 240);
     const maxControlAcceleration = THREE.MathUtils.clamp(
       dynamicPressure / 450,
-      2 * GRAVITY_MPS2,
-      8 * GRAVITY_MPS2,
+      1.5 * GRAVITY_MPS2,
+      MAX_LOAD_FACTOR_G * GRAVITY_MPS2,
     );
     const maneuverAcceleration = Math.min(requestedAcceleration, maxControlAcceleration);
     rig.debugManeuverAcceleration = maneuverAcceleration;
@@ -1110,9 +1204,19 @@ function syncFighterFromPhysics(rig: FighterRig, delta: number) {
   const translation = rig.body.translation();
   const rotation = rig.body.rotation();
   const velocity = rig.body.linvel();
+  const previousVelocity = rig.velocity.clone();
   rig.position.set(translation.x, translation.y, translation.z);
   rig.velocity.set(velocity.x, velocity.y, velocity.z);
   rig.speed = rig.velocity.length();
+  const speedMps = metersPerSecondFromWorldVelocity(rig.speed);
+  const accelerationMps2 = rig.velocity.clone()
+    .sub(previousVelocity)
+    .multiplyScalar(WORLD_UNIT_METERS / Math.max(delta, PHYSICS_DT));
+  const nonGravitationalAcceleration = accelerationMps2.clone().addScaledVector(UP, GRAVITY_MPS2);
+  rig.actualAccelerationMps2 = accelerationMps2.length();
+  rig.loadFactorG = THREE.MathUtils.clamp(nonGravitationalAcceleration.length() / GRAVITY_MPS2, 0, MAX_LOAD_FACTOR_G + 1.5);
+  rig.specificEnergyM2S2 = 0.5 * speedMps * speedMps + GRAVITY_MPS2 * Math.max(0, rig.position.y * WORLD_UNIT_METERS);
+  rig.previousVelocity.copy(rig.velocity);
   rig.forward.set(0, 0, 1).applyQuaternion(new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)).normalize();
   rig.frame.position.copy(rig.position);
   if (rig.id === 'night') rig.frame.position.y -= 0.24;
@@ -1404,6 +1508,7 @@ function maybeFire(delta: number) {
     || shooter.missileCooldown > 0
     || simTime < shooter.fireReadyAt
     || trackQualityRank(shooter.track.quality) < 3
+    || roeStatus !== 'WEAPONS FREE'
     || !['COMMIT', 'REATTACK', 'ENGAGED'].includes(shooter.tacticalState)
   ) return;
 
@@ -1482,9 +1587,13 @@ function updateCamera(time: number, delta: number) {
   const range = night.position.distanceTo(aethel.position);
   const separation = aethel.position.clone().sub(night.position);
   const focusRig = rigs[fireAuthority].health > 0 ? rigs[fireAuthority] : (fireAuthority === 'night' ? aethel : night);
-  const otherRig = focusRig.id === 'night' ? aethel : night;
+  const defensiveRig = night.incoming > 0 ? night : aethel.incoming > 0 ? aethel : focusRig;
+  const introRig = simTime < 1.2 ? night : aethel;
+  const cinematicIntro = simTime < 2.4 && missionOutcome === 'ACTIVE';
   const portrait = window.innerWidth / Math.max(1, window.innerHeight) < 0.9;
-  const targetFov = portrait ? 72 : (range <= MERGE_RANGE_WORLD ? 48 : 44);
+  const closeFight = range <= MERGE_RANGE_WORLD || missionPhase === 'WVR DOGFIGHT';
+  const defensiveCinematic = missionPhase === 'DEFENSIVE BREAK' && range <= 110;
+  const targetFov = portrait ? 72 : (cinematicIntro ? 38 : (closeFight || defensiveCinematic ? 44 : 52));
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov = targetFov;
     camera.updateProjectionMatrix();
@@ -1504,31 +1613,54 @@ function updateCamera(time: number, delta: number) {
   const viewDirection = cameraViewDirection.clone();
   const aspect = window.innerWidth / Math.max(1, window.innerHeight);
   const horizontalHalfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(targetFov * 0.5)) * aspect);
-  const fitDistance = range / Math.max(0.2, 2 * Math.tan(horizontalHalfFov)) * 1.2 + 18;
+  const fitDistance = range / Math.max(0.2, 2 * Math.tan(horizontalHalfFov)) * 1.18 + 20;
   // A defensive break is often still BVR. It needs a tactical wide shot;
-  // only the actual merge/WVR phases use the close chase framing.
-  const closeFight = range <= MERGE_RANGE_WORLD || missionPhase === 'WVR DOGFIGHT';
-  const tacticalBothFrame = closeFight || missionPhase === 'DEFENSIVE BREAK' || missionOutcome !== 'ACTIVE';
+  // only the actual merge/WVR phases use the close chase framing. Once the
+  // missile is inside the cinematic range, follow the defending aircraft so
+  // the break/jink and the seeker path remain visible instead of becoming
+  // sub-pixel marks in a kilometer-scale two-ship fit.
+  const tacticalBothFrame = !cinematicIntro && (closeFight || (missionPhase === 'DEFENSIVE BREAK' && !defensiveCinematic) || missionOutcome !== 'ACTIVE');
   const completedMission = missionOutcome !== 'ACTIVE';
   // During the merge the midpoint is the only stable framing anchor. A
   // fighter-biased focus looks dramatic until the aircraft cross, then the
   // defender can leave the frame even though the range is still WVR.
-  const closeFitDistance = range / Math.max(0.2, 2 * Math.tan(horizontalHalfFov)) * 1.38 + 20;
-  const distance = completedMission
-    ? (portrait ? 64 : 54)
+  const closeFitDistance = range / Math.max(0.2, 2 * Math.tan(horizontalHalfFov)) * 1.25 + 18;
+  const defensiveFitDistance = range / Math.max(0.2, 2 * Math.tan(horizontalHalfFov)) * 0.75 + 16;
+  const distance = cinematicIntro
+    ? (portrait ? 22 : 14)
+    : completedMission
+      ? (portrait ? 64 : 54)
     : closeFight
-      ? THREE.MathUtils.clamp(closeFitDistance, 24, 88)
+      ? THREE.MathUtils.clamp(closeFitDistance, 28, 150)
+      : defensiveCinematic
+        ? THREE.MathUtils.clamp(defensiveFitDistance, 28, 86)
       : Math.max(portrait ? 155 : 135, fitDistance);
   const focus = tacticalBothFrame
     ? completedMission
       ? focusRig.position
       : center
+    : cinematicIntro
+      ? introRig.position
+    : defensiveCinematic
+      ? defensiveRig.position
     : center.clone().lerp(focusRig.position, 0.2);
+  const nextCameraMode = cinematicIntro
+    ? `INTRO ${introRig.id.toUpperCase()}`
+    : completedMission
+      ? 'POST SEPARATION'
+      : defensiveCinematic
+        ? 'DEFENSIVE CINEMATIC'
+        : closeFight
+          ? 'WVR BOTH'
+          : 'TACTICAL BOTH';
   const desired = focus.clone()
     .add(viewDirection.multiplyScalar(distance))
-    .add(new THREE.Vector3(0, closeFight ? distance * 0.18 : distance * 0.1 + Math.sin(time * 0.28) * 2, 0));
-  camera.position.lerp(desired, Math.min(1, Math.max(delta, 1 / 60) * 6));
-  camera.lookAt(focus.clone().add(new THREE.Vector3(0, closeFight ? 0.6 : 2.5, 0)));
+    .add(new THREE.Vector3(0, closeFight || cinematicIntro ? distance * 0.18 : distance * 0.1 + Math.sin(time * 0.28) * 2, 0));
+  const cameraModeChanged = cameraMode !== nextCameraMode;
+  cameraMode = nextCameraMode;
+  if (cameraModeChanged) camera.position.copy(desired);
+  else camera.position.lerp(desired, Math.min(1, Math.max(delta, 1 / 60) * 6));
+  camera.lookAt(focus.clone().add(new THREE.Vector3(0, closeFight || defensiveCinematic || cinematicIntro ? 0.6 : 2.5, 0)));
 }
 
 function updateHud() {
@@ -1544,6 +1676,7 @@ function updateHud() {
   const missionState = document.getElementById('mission-state');
   const telemetry = document.getElementById('telemetry');
   const fireReadout = document.getElementById('fire-readout');
+  const roeReadout = document.getElementById('roe-readout');
   const nightHealth = document.getElementById('night-health');
   const aethelHealth = document.getElementById('aethel-health');
   const nightState = document.getElementById('night-state');
@@ -1564,10 +1697,13 @@ function updateHud() {
           : 'ENGAGEMENT ACTIVE';
   }
   const averageSpeedMps = metersPerSecondFromWorldVelocity((night.speed + aethel.speed) * 0.5);
+  const averageMach = (night.mach + aethel.mach) * 0.5;
+  const averageLoadFactor = Math.max(night.loadFactorG, aethel.loadFactorG);
   if (telemetry) {
-    telemetry.textContent = `RANGE ${(range * WORLD_UNIT_METERS / 1000).toFixed(2)} KM // ${closing >= 0 ? 'CLOSING' : 'OPENING'} ${Math.abs(closing * WORLD_UNIT_METERS).toFixed(0)} M/S // SPEED ${Math.round(averageSpeedMps)} M/S`;
+    telemetry.textContent = `RANGE ${(range * WORLD_UNIT_METERS / 1000).toFixed(2)} KM // ${closing >= 0 ? 'CLOSING' : 'OPENING'} ${Math.abs(closing * WORLD_UNIT_METERS).toFixed(0)} M/S // SPEED ${Math.round(averageSpeedMps)} M/S // MACH ${averageMach.toFixed(2)} // LOAD ${averageLoadFactor.toFixed(1)}G`;
   }
   if (fireReadout) fireReadout.textContent = fireAuthority === 'night' ? 'NIGHT//VECTOR' : 'AETHEL-01';
+  if (roeReadout) roeReadout.textContent = roeStatus;
   if (nightHealth) nightHealth.textContent = `${night.health}%`;
   if (aethelHealth) aethelHealth.textContent = `${aethel.health}%`;
   if (nightBar) nightBar.style.width = `${night.health}%`;
@@ -1685,6 +1821,9 @@ window.__combatDiagnostics = {
       missionPhase,
       missionOutcome,
       fireAuthority,
+      roeStatus,
+      pidConfirmedAt,
+      cameraMode,
       rangeMeters: range * WORLD_UNIT_METERS,
       closingMps: closing * WORLD_UNIT_METERS,
       camera: {
@@ -1715,7 +1854,12 @@ window.__combatDiagnostics = {
         trackConfidence: rig.track.confidence,
         trackAge: rig.track.age,
         fireReadyAt: rig.fireReadyAt,
-        energyMps2: rig.energyMps2,
+        specificEnergyM2S2: rig.specificEnergyM2S2,
+        mach: rig.mach,
+        dynamicPressurePa: rig.dynamicPressurePa,
+        angleOfAttackDeg: rig.angleOfAttackDeg,
+        loadFactorG: rig.loadFactorG,
+        actualAccelerationMps2: rig.actualAccelerationMps2,
         targetDirection: rig.debugTargetDirection.toArray(),
         flightPathTarget: rig.debugFlightPathTarget.toArray(),
         maneuverAccelerationMps2: rig.debugManeuverAcceleration,
