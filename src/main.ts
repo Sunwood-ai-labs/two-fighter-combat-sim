@@ -7,6 +7,13 @@ import { SolarInterceptor } from './solarInterceptor';
 const query = new URLSearchParams(window.location.search);
 const captureMode = query.get('capture') === '1';
 const offlineCaptureMode = query.get('offline') === '1';
+const requestedView = query.get('view');
+const forcedView = requestedView === 'tactical' || requestedView === 'night' || requestedView === 'aethel' || requestedView === 'merge'
+  ? requestedView
+  : null;
+const tileMode = query.get('tile') === '1';
+
+document.body.classList.toggle('tile-mode', tileMode);
 
 declare global {
   interface Window {
@@ -1595,14 +1602,17 @@ function updateCamera(time: number, delta: number) {
   const focusRig = rigs[fireAuthority].health > 0 ? rigs[fireAuthority] : (fireAuthority === 'night' ? aethel : night);
   const defensiveRig = night.incoming > 0 ? night : aethel.incoming > 0 ? aethel : focusRig;
   const introRig = simTime < 1.2 ? night : aethel;
-  const cinematicIntro = simTime < 2.4 && missionOutcome === 'ACTIVE';
-  const povId = !cinematicIntro && missionOutcome === 'ACTIVE'
+  const forcedTacticalView = forcedView === 'tactical';
+  const forcedMergeView = forcedView === 'merge';
+  const forcedPovId: FighterId | null = forcedView === 'night' ? 'night' : forcedView === 'aethel' ? 'aethel' : null;
+  const cinematicIntro = !forcedView && simTime < 2.4 && missionOutcome === 'ACTIVE';
+  const povId = forcedPovId ?? (!cinematicIntro && missionOutcome === 'ACTIVE'
     ? POV_SEGMENTS.find(({ start, end }) => simTime >= start && simTime < end)?.id ?? null
-    : null;
+    : null);
   const povRig = povId ? rigs[povId] : null;
   const portrait = window.innerWidth / Math.max(1, window.innerHeight) < 0.9;
-  const closeFight = range <= MERGE_RANGE_WORLD || missionPhase === 'WVR DOGFIGHT';
-  const defensiveCinematic = missionPhase === 'DEFENSIVE BREAK' && range <= 110;
+  const closeFight = !forcedTacticalView && (range <= MERGE_RANGE_WORLD || missionPhase === 'WVR DOGFIGHT' || forcedMergeView);
+  const defensiveCinematic = !forcedTacticalView && missionPhase === 'DEFENSIVE BREAK' && range <= 110;
   const targetFov = portrait ? 72 : (povRig ? 46 : (cinematicIntro ? 38 : (closeFight || defensiveCinematic ? 44 : 52)));
   night.model.visible = !povRig || povRig.id !== 'night';
   aethel.model.visible = !povRig || povRig.id !== 'aethel';
@@ -1656,7 +1666,11 @@ function updateCamera(time: number, delta: number) {
     : defensiveCinematic
       ? defensiveRig.position
     : center.clone().lerp(focusRig.position, 0.2);
-  const nextCameraMode = povRig
+  const nextCameraMode = forcedTacticalView
+    ? 'TACTICAL BOTH'
+    : forcedMergeView
+      ? 'MERGE CHASE'
+      : povRig
     ? `POV ${povRig.id === 'night' ? 'NIGHT//VECTOR' : 'AETHEL-01'}`
     : cinematicIntro
       ? `INTRO ${introRig.id.toUpperCase()}`
@@ -1716,6 +1730,8 @@ function updateHud() {
   const cameraReadout = document.getElementById('camera-readout');
   const povOverlay = document.getElementById('pov-overlay');
   const povLockLabel = document.getElementById('pov-lock-label');
+  const tileViewTitle = document.getElementById('tile-view-title');
+  const tileViewMeta = document.getElementById('tile-view-meta');
   const rangeReadout = document.getElementById('range-readout');
   const closingReadout = document.getElementById('closing-readout');
   const missionTime = document.getElementById('mission-time');
@@ -1738,6 +1754,16 @@ function updateHud() {
       ? `TARGET // ${cameraMode === 'POV NIGHT//VECTOR' ? 'AETHEL-01' : 'NIGHT//VECTOR'}`
       : 'TARGET // --';
   }
+  if (tileViewTitle) {
+    tileViewTitle.textContent = forcedView === 'night'
+      ? 'NIGHT//VECTOR // POV'
+      : forcedView === 'aethel'
+        ? 'AETHEL-01 // POV'
+        : forcedView === 'merge'
+          ? 'MERGE // CHASE'
+          : 'TACTICAL // BOTH';
+  }
+  if (tileViewMeta) tileViewMeta.textContent = `${formatTime(simTime)} // ${phase}`;
   if (rangeReadout) rangeReadout.textContent = `${(range / 100).toFixed(2)} KM`;
   if (closingReadout) closingReadout.textContent = `${closing >= 0 ? 'CLOSING' : 'OPENING'} ${Math.abs(closing * WORLD_UNIT_METERS).toFixed(0)} M/S`;
   if (missionTime) missionTime.textContent = formatTime(simTime);
