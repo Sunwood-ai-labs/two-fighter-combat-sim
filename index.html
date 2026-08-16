@@ -55,6 +55,7 @@
       </div>
 
       <div class="hud tactical-readout" aria-live="polite">
+        <div><span>CAMERA</span><strong id="camera-readout">TACTICAL BOTH</strong></div>
         <div><span>TACTICAL PHASE</span><strong id="phase-readout">APPROACH</strong></div>
         <div><span>SEPARATION</span><strong id="range-readout">-- KM</strong></div>
         <div><span>RELATIVE MOTION</span><strong id="closing-readout">-- M/S</strong></div>
@@ -74,6 +75,10 @@
         </div>
       </div>
 
+      <div class="pov-overlay" id="pov-overlay" aria-hidden="true">
+        <span class="pov-lock-label" id="pov-lock-label">TARGET // --</span>
+        <i></i><b></b><em></em><strong></strong>
+      </div>
       <div class="crosshair" aria-hidden="true"><i></i><b></b><em></em></div>
       <div class="scanline" aria-hidden="true"></div>
     </div>

@@ -163,6 +163,12 @@ const STALL_SPEED_MPS = 42;
 const MAX_FLIGHT_PATH_PITCH = THREE.MathUtils.degToRad(28);
 const TWO_PI = Math.PI * 2;
 const CYCLE_DURATION = 36;
+const POV_SEGMENTS: Array<{ start: number; end: number; id: FighterId }> = [
+  { start: 3.2, end: 6.8, id: 'night' },
+  { start: 6.8, end: 10.4, id: 'aethel' },
+  { start: 14.8, end: 18.7, id: 'night' },
+  { start: 18.7, end: 22.6, id: 'aethel' },
+];
 const INITIAL_POSITIONS: Record<FighterId, THREE.Vector3> = {
   night: new THREE.Vector3(-280, 90, 26),
   aethel: new THREE.Vector3(280, 92, -26),
@@ -1590,10 +1596,16 @@ function updateCamera(time: number, delta: number) {
   const defensiveRig = night.incoming > 0 ? night : aethel.incoming > 0 ? aethel : focusRig;
   const introRig = simTime < 1.2 ? night : aethel;
   const cinematicIntro = simTime < 2.4 && missionOutcome === 'ACTIVE';
+  const povId = !cinematicIntro && missionOutcome === 'ACTIVE'
+    ? POV_SEGMENTS.find(({ start, end }) => simTime >= start && simTime < end)?.id ?? null
+    : null;
+  const povRig = povId ? rigs[povId] : null;
   const portrait = window.innerWidth / Math.max(1, window.innerHeight) < 0.9;
   const closeFight = range <= MERGE_RANGE_WORLD || missionPhase === 'WVR DOGFIGHT';
   const defensiveCinematic = missionPhase === 'DEFENSIVE BREAK' && range <= 110;
-  const targetFov = portrait ? 72 : (cinematicIntro ? 38 : (closeFight || defensiveCinematic ? 44 : 52));
+  const targetFov = portrait ? 72 : (povRig ? 46 : (cinematicIntro ? 38 : (closeFight || defensiveCinematic ? 44 : 52)));
+  night.model.visible = !povRig || povRig.id !== 'night';
+  aethel.model.visible = !povRig || povRig.id !== 'aethel';
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov = targetFov;
     camera.updateProjectionMatrix();
@@ -1619,7 +1631,7 @@ function updateCamera(time: number, delta: number) {
   // missile is inside the cinematic range, follow the defending aircraft so
   // the break/jink and the seeker path remain visible instead of becoming
   // sub-pixel marks in a kilometer-scale two-ship fit.
-  const tacticalBothFrame = !cinematicIntro && (closeFight || (missionPhase === 'DEFENSIVE BREAK' && !defensiveCinematic) || missionOutcome !== 'ACTIVE');
+  const tacticalBothFrame = !cinematicIntro && !povRig && (closeFight || (missionPhase === 'DEFENSIVE BREAK' && !defensiveCinematic) || missionOutcome !== 'ACTIVE');
   const completedMission = missionOutcome !== 'ACTIVE';
   // During the merge the midpoint is the only stable framing anchor. A
   // fighter-biased focus looks dramatic until the aircraft cross, then the
@@ -1644,23 +1656,54 @@ function updateCamera(time: number, delta: number) {
     : defensiveCinematic
       ? defensiveRig.position
     : center.clone().lerp(focusRig.position, 0.2);
-  const nextCameraMode = cinematicIntro
-    ? `INTRO ${introRig.id.toUpperCase()}`
-    : completedMission
-      ? 'POST SEPARATION'
-      : defensiveCinematic
-        ? 'DEFENSIVE CINEMATIC'
-        : closeFight
-          ? 'WVR BOTH'
-          : 'TACTICAL BOTH';
-  const desired = focus.clone()
-    .add(viewDirection.multiplyScalar(distance))
-    .add(new THREE.Vector3(0, closeFight || cinematicIntro ? distance * 0.18 : distance * 0.1 + Math.sin(time * 0.28) * 2, 0));
+  const nextCameraMode = povRig
+    ? `POV ${povRig.id === 'night' ? 'NIGHT//VECTOR' : 'AETHEL-01'}`
+    : cinematicIntro
+      ? `INTRO ${introRig.id.toUpperCase()}`
+      : completedMission
+        ? 'POST SEPARATION'
+        : defensiveCinematic
+          ? 'DEFENSIVE CINEMATIC'
+          : closeFight
+            ? 'WVR BOTH'
+            : 'TACTICAL BOTH';
+  let desired: THREE.Vector3;
+  let cameraLookAt: THREE.Vector3;
+  if (povRig) {
+    const targetRig = povRig.id === 'night' ? aethel : night;
+    const rigUp = UP.clone().applyQuaternion(povRig.frame.quaternion).normalize();
+    const rigForward = povRig.forward.clone().normalize();
+    const targetDirection = targetRig.position.clone().sub(povRig.position).normalize();
+    const targetBias = rigForward.dot(targetDirection) > 0.3 ? 0.66 : 0.94;
+    const lookDirection = rigForward.clone().lerp(targetDirection, targetBias).normalize();
+    // Both visual models are scaled to 0.18 in their fighter frames. Keep the
+    // camera inside the actual canopy instead of using unscaled mesh offsets;
+    // the latter placed the lens ahead of the nose and let the own airframe
+    // occlude the POV during defensive turns.
+    const cockpitForwardOffset = povRig.id === 'night' ? 0.38 : 0.18;
+    const cockpitHeight = povRig.id === 'night' ? 0.12 : 0.09;
+    const vibration = THREE.MathUtils.clamp(
+      Math.max(0, povRig.loadFactorG - 1) * 0.012 + (povRig.incoming > 0 ? 0.035 : 0),
+      0,
+      0.12,
+    );
+    const cockpitPosition = povRig.position.clone()
+      .addScaledVector(rigForward, cockpitForwardOffset)
+      .addScaledVector(rigUp, cockpitHeight)
+      .addScaledVector(rigUp, Math.sin(time * 34 + povRig.sideBias) * vibration * 0.7);
+    desired = cockpitPosition;
+    cameraLookAt = targetRig.position.clone().addScaledVector(rigUp, 0.35);
+  } else {
+    desired = focus.clone()
+      .add(viewDirection.multiplyScalar(distance))
+      .add(new THREE.Vector3(0, closeFight || cinematicIntro ? distance * 0.18 : distance * 0.1 + Math.sin(time * 0.28) * 2, 0));
+    cameraLookAt = focus.clone().add(new THREE.Vector3(0, closeFight || defensiveCinematic || cinematicIntro ? 0.6 : 2.5, 0));
+  }
   const cameraModeChanged = cameraMode !== nextCameraMode;
   cameraMode = nextCameraMode;
   if (cameraModeChanged) camera.position.copy(desired);
   else camera.position.lerp(desired, Math.min(1, Math.max(delta, 1 / 60) * 6));
-  camera.lookAt(focus.clone().add(new THREE.Vector3(0, closeFight || defensiveCinematic || cinematicIntro ? 0.6 : 2.5, 0)));
+  camera.lookAt(cameraLookAt);
 }
 
 function updateHud() {
@@ -1670,6 +1713,9 @@ function updateHud() {
   const closing = -relativeVelocity.dot(line);
   const phase = phaseAt(range, closing, night.incoming + aethel.incoming);
   const phaseReadout = document.getElementById('phase-readout');
+  const cameraReadout = document.getElementById('camera-readout');
+  const povOverlay = document.getElementById('pov-overlay');
+  const povLockLabel = document.getElementById('pov-lock-label');
   const rangeReadout = document.getElementById('range-readout');
   const closingReadout = document.getElementById('closing-readout');
   const missionTime = document.getElementById('mission-time');
@@ -1684,6 +1730,14 @@ function updateHud() {
   const nightBar = document.getElementById('night-health-bar') as HTMLElement | null;
   const aethelBar = document.getElementById('aethel-health-bar') as HTMLElement | null;
   if (phaseReadout) phaseReadout.textContent = phase;
+  if (cameraReadout) cameraReadout.textContent = cameraMode;
+  const isPov = cameraMode.startsWith('POV ');
+  povOverlay?.classList.toggle('is-active', isPov);
+  if (povLockLabel) {
+    povLockLabel.textContent = isPov
+      ? `TARGET // ${cameraMode === 'POV NIGHT//VECTOR' ? 'AETHEL-01' : 'NIGHT//VECTOR'}`
+      : 'TARGET // --';
+  }
   if (rangeReadout) rangeReadout.textContent = `${(range / 100).toFixed(2)} KM`;
   if (closingReadout) closingReadout.textContent = `${closing >= 0 ? 'CLOSING' : 'OPENING'} ${Math.abs(closing * WORLD_UNIT_METERS).toFixed(0)} M/S`;
   if (missionTime) missionTime.textContent = formatTime(simTime);

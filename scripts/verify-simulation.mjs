@@ -58,7 +58,11 @@ const roeStates = unique(snapshots.map(({ snapshot }) => snapshot.roeStatus));
 const outcomes = unique(snapshots.map(({ snapshot }) => snapshot.missionOutcome));
 const cameraModes = unique(snapshots.map(({ snapshot }) => snapshot.cameraMode));
 const introSnapshots = snapshots.filter(({ snapshot }) => String(snapshot.cameraMode).startsWith('INTRO '));
-const activeSnapshots = snapshots.filter(({ snapshot }) => snapshot.missionOutcome === 'ACTIVE' && !String(snapshot.cameraMode).startsWith('INTRO '));
+const povNightSnapshots = snapshots.filter(({ snapshot }) => snapshot.cameraMode === 'POV NIGHT//VECTOR');
+const povAethelSnapshots = snapshots.filter(({ snapshot }) => snapshot.cameraMode === 'POV AETHEL-01');
+const activeSnapshots = snapshots.filter(({ snapshot }) => snapshot.missionOutcome === 'ACTIVE'
+  && !String(snapshot.cameraMode).startsWith('INTRO ')
+  && !String(snapshot.cameraMode).startsWith('POV '));
 const maxActiveNdcRecord = activeSnapshots.reduce((peak, record) => {
   const { time, snapshot } = record;
   const values = [...snapshot.camera.nightNdc, ...snapshot.camera.aethelNdc].map(Math.abs);
@@ -70,6 +74,8 @@ const maxIntroNdc = introSnapshots.reduce((peak, { snapshot }) => {
   const focusedNdc = snapshot.cameraMode === 'INTRO NIGHT' ? snapshot.camera.nightNdc : snapshot.camera.aethelNdc;
   return Math.max(peak, ...focusedNdc.map(Math.abs));
 }, 0);
+const maxNightPovTargetNdc = povNightSnapshots.reduce((peak, { snapshot }) => Math.max(peak, ...snapshot.camera.aethelNdc.map(Math.abs)), 0);
+const maxAethelPovTargetNdc = povAethelSnapshots.reduce((peak, { snapshot }) => Math.max(peak, ...snapshot.camera.nightNdc.map(Math.abs)), 0);
 const allFighters = snapshots.flatMap(({ snapshot }) => Object.values(snapshot.fighters));
 const finiteNumbers = allFighters.flatMap((fighter) => [
   ...fighter.position,
@@ -103,6 +109,12 @@ const report = {
   maxActiveNdc,
   peakActiveNdc: maxActiveNdcRecord,
   maxIntroNdc,
+  povCoverage: {
+    nightFrames: povNightSnapshots.length,
+    aethelFrames: povAethelSnapshots.length,
+    maxNightPovTargetNdc,
+    maxAethelPovTargetNdc,
+  },
   maxLoadFactorG,
   missilesFired,
   missilesEvaded,
@@ -118,6 +130,8 @@ if (diagnostics.length > 0) failures.push(`browser diagnostics: ${diagnostics.le
 if (!report.physicsEngines.every((engine) => engine === 'rapier3d')) failures.push('physics engine was not rapier3d for every frame');
 if (missingPhases.length > 0) failures.push(`missing phases: ${missingPhases.join(', ')}`);
 if (!cameraModes.includes('INTRO NIGHT') || !cameraModes.includes('INTRO AETHEL')) failures.push('cinematic intro did not frame both fighters');
+if (povNightSnapshots.length < 30 || povAethelSnapshots.length < 30) failures.push('both fighter POV segments were not captured');
+if (maxNightPovTargetNdc > 1.15 || maxAethelPovTargetNdc > 1.15) failures.push('POV target left the usable frame');
 if (!roeStates.includes('WEAPONS FREE')) failures.push('ROE never reached WEAPONS FREE');
 if (!outcomes.includes('SEPARATED') && !outcomes.includes('KILL')) failures.push('mission did not reach a terminal outcome');
 if (maxActiveNdc > 1.05) failures.push(`active fighter left frame: max NDC ${maxActiveNdc.toFixed(3)}`);

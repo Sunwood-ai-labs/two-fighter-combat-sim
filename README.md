@@ -18,7 +18,7 @@
 
 ## 検証済みのシナリオ
 
-36秒の固定再生で、`SEARCH → TRACK → IDENTIFY → COMMIT → DEFENSIVE BREAK → MERGE → WVR DOGFIGHT → SEPARATE` の遷移、`WEAPONS HOLD → PID CONFIRM → WEAPONS FREE → CEASE FIRE` のROE、BVRミサイル1発の発射・回避、Rapierの120 Hz積分、冒頭の機体クローズアップと戦闘中の画面内追従を確認できます。キャプチャは `scripts/capture-landscape.mjs` から再生成できます。
+36秒の固定再生で、`SEARCH → TRACK → IDENTIFY → COMMIT → DEFENSIVE BREAK → MERGE → WVR DOGFIGHT → SEPARATE` の遷移、`WEAPONS HOLD → PID CONFIRM → WEAPONS FREE → CEASE FIRE` のROE、BVRミサイル1発の発射・回避、Rapierの120 Hz積分、冒頭の機体クローズアップ、戦闘中の画面内追従、両機それぞれのコクピットPOVを確認できます。キャプチャは `scripts/capture-landscape.mjs` から再生成できます。
 
 この飛行モデルは、公開されている空戦ドクトリンの流れをThree.js上で再生するための近似モデルです。速度・加速度・G制限・センサー遅延・ミサイルのシーカー視野は設定値であり、CFD、実機の飛行認証、実戦用の戦術ソフトウェアを再現するものではありません。
 

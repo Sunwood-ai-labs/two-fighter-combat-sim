@@ -53,7 +53,7 @@ body { min-width: 320px; }
 .event-row b { font-weight: 400; }
 .event-row--accent b { color: #fff0c4; }
 
-.tactical-readout { right: 36px; bottom: 92px; min-width: 640px; padding: 12px 16px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; border-right: 1px solid rgba(224, 252, 255, .72); background: linear-gradient(270deg, rgba(13, 57, 75, .5), rgba(13, 57, 75, 0)); backdrop-filter: blur(3px); }
+.tactical-readout { right: 36px; bottom: 92px; min-width: 760px; padding: 12px 16px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; border-right: 1px solid rgba(224, 252, 255, .72); background: linear-gradient(270deg, rgba(13, 57, 75, .5), rgba(13, 57, 75, 0)); backdrop-filter: blur(3px); }
 .tactical-readout div { display: flex; flex-direction: column; gap: 5px; }
 .tactical-readout span { font-family: 'Space Mono', monospace; font-size: 8px; letter-spacing: .08em; color: rgba(240, 255, 255, .64); }
 .tactical-readout strong { font-family: 'Space Mono', monospace; font-size: 12px; letter-spacing: .04em; color: #fff0c4; white-space: nowrap; }
@@ -67,6 +67,14 @@ body { min-width: 320px; }
 .controls button:hover { background: rgba(15, 97, 119, .52); }
 .key-hint { font-family: 'Space Mono', monospace; font-size: 9px; color: rgba(245, 255, 255, .65); margin-left: 6px; }
 
+.pov-overlay { position: absolute; z-index: 2; top: 50%; left: 50%; width: 174px; height: 118px; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; transition: opacity .18s ease; color: #fff0c4; }
+.pov-overlay.is-active { opacity: .9; }
+.pov-overlay i, .pov-overlay b, .pov-overlay em, .pov-overlay strong { position: absolute; display: block; }
+.pov-overlay i { inset: 10px 0; border-top: 1px solid currentColor; border-bottom: 1px solid currentColor; opacity: .28; }
+.pov-overlay b { left: 0; top: 10px; width: 22px; height: 22px; border-left: 2px solid currentColor; border-top: 2px solid currentColor; }
+.pov-overlay em { right: 0; bottom: 10px; width: 22px; height: 22px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; }
+.pov-overlay strong { left: 50%; top: 50%; width: 8px; height: 8px; transform: translate(-50%, -50%); border: 1px solid currentColor; border-radius: 50%; box-shadow: 0 0 14px currentColor; }
+.pov-lock-label { position: absolute; left: 0; top: -16px; font-family: 'Space Mono', monospace; font-size: 8px; letter-spacing: .08em; white-space: nowrap; }
 .crosshair { position: absolute; z-index: 2; top: 50%; left: 50%; width: 66px; height: 66px; transform: translate(-50%, -50%); opacity: .52; pointer-events: none; }
 .crosshair i, .crosshair b, .crosshair em { position: absolute; display: block; }
 .crosshair i { inset: 8px; border: 1px solid rgba(255, 255, 255, .72); border-radius: 50%; }
