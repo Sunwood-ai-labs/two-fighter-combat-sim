@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+*.mp4
+*.webm
+*.mov
+*.png
+*.jpg
+*.jpeg
+qa-frames/
+capture-video/
+video-capture-*/
+.DS_Store
+

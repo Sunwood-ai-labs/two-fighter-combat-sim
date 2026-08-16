@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#9ccfe0" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>TWO-FRAME // Aerial Combat Simulation</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="canvas-container"></div>
+      <div class="sky-wash"></div>
+      <div class="hud hud-top">
+        <div class="hud-brand">
+          <span class="eyebrow">THREE.JS // LIVE SIMULATION</span>
+          <h1>TWO-FRAME <span>COMBAT</span></h1>
+          <p>SENSOR → BVR → WVR // RAPIER 3D FLIGHT MODEL</p>
+        </div>
+        <div class="mission-status">
+          <span class="status-dot"></span>
+          <span id="mission-state">ENGAGEMENT ACTIVE</span>
+          <span class="mission-time" id="mission-time">00:00</span>
+        </div>
+      </div>
+
+      <div class="hud fighter-card fighter-card--night" id="night-card">
+        <div class="card-head">
+          <div>
+            <span class="card-kicker">RED // VECTOR-09</span>
+            <strong>NIGHT//VECTOR</strong>
+          </div>
+          <span class="card-code">NV-09</span>
+        </div>
+        <div class="health-line"><span id="night-health-bar"></span></div>
+        <div class="card-meta"><span id="night-state">SEARCH // NO TRACK</span><b id="night-health">100%</b></div>
+      </div>
+
+      <div class="hud fighter-card fighter-card--aethel" id="aethel-card">
+        <div class="card-head">
+          <div>
+            <span class="card-kicker">BLUE // AETHEL-01</span>
+            <strong>AETHEL-01</strong>
+          </div>
+          <span class="card-code">AS-01</span>
+        </div>
+        <div class="health-line"><span id="aethel-health-bar"></span></div>
+        <div class="card-meta"><span id="aethel-state">SEARCH // NO TRACK</span><b id="aethel-health">100%</b></div>
+      </div>
+
+      <div class="hud event-panel">
+        <span class="event-label">TACTICAL FEED</span>
+        <div id="event-feed" aria-live="polite"></div>
+      </div>
+
+      <div class="hud tactical-readout" aria-live="polite">
+        <div><span>TACTICAL PHASE</span><strong id="phase-readout">APPROACH</strong></div>
+        <div><span>SEPARATION</span><strong id="range-readout">-- KM</strong></div>
+        <div><span>RELATIVE MOTION</span><strong id="closing-readout">-- M/S</strong></div>
+        <div><span>FIRE AUTHORITY</span><strong id="fire-readout">NIGHT</strong></div>
+      </div>
+
+      <div class="hud hud-bottom">
+        <div class="bottom-copy">
+          <span class="bottom-label">SIMULATION TELEMETRY</span>
+          <span id="telemetry">ALT 38.5 KM // RELATIVE 0.00 KM/S // WEAPONS ARMED</span>
+        </div>
+        <div class="controls">
+          <button id="pause-btn" type="button">Ⅱ PAUSE</button>
+          <button id="reset-btn" type="button">↻ RESET</button>
+          <span class="key-hint">SPACE / P</span>
+        </div>
+      </div>
+
+      <div class="crosshair" aria-hidden="true"><i></i><b></b><em></em></div>
+      <div class="scanline" aria-hidden="true"></div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
