@@ -12,8 +12,13 @@ const forcedView = requestedView === 'tactical' || requestedView === 'night' || 
   ? requestedView
   : null;
 const tileMode = query.get('tile') === '1';
+// The tiled capture is a communication artifact, so give the two contacts a
+// little more visual presence without changing their physical dimensions or
+// the normal interactive view.
+const AIRFRAME_VISUAL_SCALE = tileMode ? 0.42 : 0.18;
 
 document.body.classList.toggle('tile-mode', tileMode);
+document.body.dataset.tileView = forcedView ?? 'tactical';
 
 declare global {
   interface Window {
@@ -386,7 +391,7 @@ function createNightRig(): FighterRig {
   const frame = new THREE.Group();
   frame.name = 'NIGHT_VECTOR_FRAME';
   const controller: InterceptorController = createCyberpunkInterceptor(createShipMaterials());
-  controller.root.scale.setScalar(0.18);
+  controller.root.scale.setScalar(AIRFRAME_VISUAL_SCALE);
   frame.add(controller.root);
   scene.add(frame);
 
@@ -461,7 +466,7 @@ function createAethelRig(): FighterRig {
   const frame = new THREE.Group();
   frame.name = 'AETHEL_01_FRAME';
   const interceptor = new SolarInterceptor();
-  interceptor.group.scale.setScalar(0.18);
+  interceptor.group.scale.setScalar(AIRFRAME_VISUAL_SCALE);
   frame.add(interceptor.group);
   scene.add(frame);
 
@@ -1613,7 +1618,13 @@ function updateCamera(time: number, delta: number) {
   const portrait = window.innerWidth / Math.max(1, window.innerHeight) < 0.9;
   const closeFight = !forcedTacticalView && (range <= MERGE_RANGE_WORLD || missionPhase === 'WVR DOGFIGHT' || forcedMergeView);
   const defensiveCinematic = !forcedTacticalView && missionPhase === 'DEFENSIVE BREAK' && range <= 110;
-  const targetFov = portrait ? 72 : (povRig ? 46 : (cinematicIntro ? 38 : (closeFight || defensiveCinematic ? 44 : 52)));
+  const targetFov = portrait ? 72 : (povRig
+    ? (tileMode ? 40 : 46)
+    : forcedTacticalView
+      ? 38
+      : forcedMergeView
+        ? 42
+        : (cinematicIntro ? 38 : (closeFight || defensiveCinematic ? 44 : 52)));
   night.model.visible = !povRig || povRig.id !== 'night';
   aethel.model.visible = !povRig || povRig.id !== 'aethel';
   if (Math.abs(camera.fov - targetFov) > 0.01) {
@@ -1730,8 +1741,16 @@ function updateHud() {
   const cameraReadout = document.getElementById('camera-readout');
   const povOverlay = document.getElementById('pov-overlay');
   const povLockLabel = document.getElementById('pov-lock-label');
+  const tileViewIndex = document.getElementById('tile-view-index');
+  const tileViewKicker = document.getElementById('tile-view-kicker');
   const tileViewTitle = document.getElementById('tile-view-title');
+  const tileViewRole = document.getElementById('tile-view-role');
   const tileViewMeta = document.getElementById('tile-view-meta');
+  const tileViewBadge = document.getElementById('tile-view-badge');
+  const tileContactNight = document.getElementById('tile-contact-night');
+  const tileContactAethel = document.getElementById('tile-contact-aethel');
+  const tileContactNightState = document.getElementById('tile-contact-night-state');
+  const tileContactAethelState = document.getElementById('tile-contact-aethel-state');
   const rangeReadout = document.getElementById('range-readout');
   const closingReadout = document.getElementById('closing-readout');
   const missionTime = document.getElementById('mission-time');
@@ -1754,16 +1773,38 @@ function updateHud() {
       ? `TARGET // ${cameraMode === 'POV NIGHT//VECTOR' ? 'AETHEL-01' : 'NIGHT//VECTOR'}`
       : 'TARGET // --';
   }
-  if (tileViewTitle) {
-    tileViewTitle.textContent = forcedView === 'night'
-      ? 'NIGHT//VECTOR // POV'
-      : forcedView === 'aethel'
-        ? 'AETHEL-01 // POV'
-        : forcedView === 'merge'
-          ? 'MERGE // CHASE'
-          : 'TACTICAL // BOTH';
+  const tileConfig = forcedView === 'night'
+    ? { index: '02', kicker: 'CAM 02 // NIGHT//VECTOR', title: 'PILOT POV // NIGHT//VECTOR', role: 'ONBOARD CAMERA // TARGET: AETHEL-01', badge: 'PILOT / TARGET LOCK' }
+    : forcedView === 'aethel'
+      ? { index: '03', kicker: 'CAM 03 // AETHEL-01', title: 'PILOT POV // AETHEL-01', role: 'ONBOARD CAMERA // TARGET: NIGHT//VECTOR', badge: 'PILOT / TARGET LOCK' }
+      : forcedView === 'merge'
+        ? { index: '04', kicker: 'CAM 04 // CLOSE CHASE', title: 'MERGE // CLOSE CHASE', role: 'EXTERNAL CAMERA // WVR ENGAGEMENT', badge: 'CLOSE-RANGE TRACK' }
+        : { index: '01', kicker: 'CAM 01 // EXTERNAL TRACK', title: 'TACTICAL // BOTH AIRCRAFT', role: 'EXTERNAL CAMERA // BOTH AIRCRAFT', badge: 'EXTERNAL TRACK' };
+  if (tileViewIndex) tileViewIndex.textContent = tileConfig.index;
+  if (tileViewKicker) tileViewKicker.textContent = tileConfig.kicker;
+  if (tileViewTitle) tileViewTitle.textContent = tileConfig.title;
+  if (tileViewRole) tileViewRole.textContent = tileConfig.role;
+  if (tileViewMeta) tileViewMeta.textContent = `SYNC T+${formatTime(simTime)} // ${phase}`;
+  if (tileViewBadge) tileViewBadge.textContent = tileConfig.badge;
+  if (tileContactNightState) tileContactNightState.textContent = `RED // ${night.tacticalState}`;
+  if (tileContactAethelState) tileContactAethelState.textContent = `BLUE // ${aethel.tacticalState}`;
+  if (tileMode && forcedView === 'tactical') {
+    const viewport = new THREE.Vector3();
+    const placeContactLabel = (element: HTMLElement | null, rig: FighterRig) => {
+      if (!element) return;
+      viewport.copy(rig.position).addScaledVector(UP, 5).project(camera);
+      const onScreen = viewport.z > -1 && viewport.z < 1 && viewport.x > -1.1 && viewport.x < 1.1 && viewport.y > -1.1 && viewport.y < 1.1;
+      element.hidden = !onScreen;
+      if (!onScreen) return;
+      element.style.left = `${THREE.MathUtils.clamp((viewport.x * 0.5 + 0.5) * 100 + 1.2, 4, 88)}%`;
+      element.style.top = `${THREE.MathUtils.clamp((1 - (viewport.y * 0.5 + 0.5)) * 100, 17, 94)}%`;
+    };
+    placeContactLabel(tileContactNight, night);
+    placeContactLabel(tileContactAethel, aethel);
+  } else {
+    if (tileContactNight) tileContactNight.hidden = true;
+    if (tileContactAethel) tileContactAethel.hidden = true;
   }
-  if (tileViewMeta) tileViewMeta.textContent = `${formatTime(simTime)} // ${phase}`;
   if (rangeReadout) rangeReadout.textContent = `${(range / 100).toFixed(2)} KM`;
   if (closingReadout) closingReadout.textContent = `${closing >= 0 ? 'CLOSING' : 'OPENING'} ${Math.abs(closing * WORLD_UNIT_METERS).toFixed(0)} M/S`;
   if (missionTime) missionTime.textContent = formatTime(simTime);

@@ -12,12 +12,20 @@ const height = Number(process.argv[5] ?? 1080);
 const sourceUrlArg = process.argv.find((argument) => argument.startsWith('--source-url='));
 const sourceUrlValue = sourceUrlArg?.slice('--source-url='.length) ?? 'http://127.0.0.1:4191/';
 const views = ['tactical', 'night', 'aethel', 'merge'];
-const tileWidth = Math.floor(width / 2);
-const tileHeight = Math.floor(height / 2);
+const mainWidth = Math.floor(width * 2 / 3);
+const sideWidth = width - mainWidth;
+const sideHeight = Math.floor(height / 3);
+const panelSizes = {
+  tactical: { width: mainWidth, height },
+  night: { width: sideWidth, height: sideHeight },
+  aethel: { width: sideWidth, height: sideHeight },
+  merge: { width: sideWidth, height: height - (sideHeight * 2) },
+};
 
 if (!Number.isFinite(captureSeconds) || captureSeconds < 5 || !Number.isInteger(width) || !Number.isInteger(height) || width < 960 || height < 540) {
   throw new Error('captureSeconds must be at least 5 seconds and viewport must be an integer >= 960x540');
 }
+if (height % 3 !== 0) throw new Error('height must be divisible by 3 for the main-left / three-panel-right layout');
 
 fs.mkdirSync(outputDir, { recursive: true });
 const tileDir = path.join(outputDir, 'tiles');
@@ -44,8 +52,8 @@ const browser = await chromium.launch({
   args: ['--enable-webgl', '--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=d3d11', '--autoplay-policy=no-user-gesture-required'],
 });
 const context = await browser.newContext({
-  viewport: { width: tileWidth, height: tileHeight },
-  screen: { width: tileWidth, height: tileHeight },
+  viewport: panelSizes.tactical,
+  screen: panelSizes.tactical,
   deviceScaleFactor: 1,
   ignoreHTTPSErrors: true,
 });
@@ -63,6 +71,7 @@ try {
     url.searchParams.set('tile', '1');
     url.searchParams.set('view', view);
     const page = await context.newPage();
+    await page.setViewportSize(panelSizes[view]);
     page.__viewName = view;
     page.on('console', (message) => {
       if (['error', 'warning'].includes(message.type())) diagnostics.push({ view, type: message.type(), text: message.text() });
@@ -111,7 +120,7 @@ try {
     '-y',
     ...tileInputs,
     '-filter_complex',
-    `[0:v]scale=${tileWidth}:${tileHeight}:flags=lanczos[t0];[1:v]scale=${tileWidth}:${tileHeight}:flags=lanczos[t1];[2:v]scale=${tileWidth}:${tileHeight}:flags=lanczos[t2];[3:v]scale=${tileWidth}:${tileHeight}:flags=lanczos[t3];[t0][t1][t2][t3]xstack=inputs=4:layout=0_0|${tileWidth}_0|0_${tileHeight}|${tileWidth}_${tileHeight}:fill=0x07131a[v]`,
+    `[0:v]scale=${mainWidth}:${height}:flags=lanczos[t0];[1:v]scale=${sideWidth}:${sideHeight}:flags=lanczos[t1];[2:v]scale=${sideWidth}:${sideHeight}:flags=lanczos[t2];[3:v]scale=${sideWidth}:${sideHeight}:flags=lanczos[t3];[t0][t1][t2][t3]xstack=inputs=4:layout=0_0|${mainWidth}_0|${mainWidth}_${sideHeight}|${mainWidth}_${sideHeight * 2}:fill=0x07131a[v]`,
     '-map', '[v]',
     '-an',
     '-c:v', 'libx264',
@@ -136,7 +145,12 @@ const report = {
   sourceUrl: sourceUrlValue,
   views,
   captureSeconds,
-  layout: { width, height, columns: 2, rows: 2, tileWidth, tileHeight },
+  layout: {
+    width,
+    height,
+    type: 'main-left-three-panel-right',
+    panels: panelSizes,
+  },
   mode: 'offline-four-view-individual-encoders-xstack',
   diagnostics,
   rawPath,

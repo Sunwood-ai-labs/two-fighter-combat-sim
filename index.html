@@ -13,9 +13,30 @@
       <div id="canvas-container"></div>
       <div class="sky-wash"></div>
       <div class="tile-chrome" id="tile-chrome" aria-hidden="true">
-        <span class="tile-kicker">SAME-TIME COMBAT FEED</span>
-        <strong id="tile-view-title">TACTICAL // BOTH</strong>
-        <small id="tile-view-meta">00:00 // SEARCH</small>
+        <div class="tile-headline">
+          <span class="tile-index" id="tile-view-index">01</span>
+          <div>
+            <span class="tile-kicker" id="tile-view-kicker">CAM 01 // EXTERNAL TRACK</span>
+            <strong id="tile-view-title">TACTICAL // BOTH AIRCRAFT</strong>
+          </div>
+        </div>
+        <span class="tile-view-role" id="tile-view-role">EXTERNAL CAMERA // BOTH AIRCRAFT</span>
+        <div class="tile-legend" aria-hidden="true">
+          <span class="tile-legend__night">● NIGHT//VECTOR</span>
+          <span class="tile-legend__aethel">● AETHEL-01</span>
+        </div>
+        <div class="tile-view-footer">
+          <small id="tile-view-meta">SYNC T+00:00 // SEARCH</small>
+          <b id="tile-view-badge">EXTERNAL TRACK</b>
+        </div>
+      </div>
+      <div class="tile-contact-label tile-contact-label--night" id="tile-contact-night" aria-hidden="true">
+        <span class="tile-contact-dot"></span>
+        <span><b>NIGHT//VECTOR</b><small id="tile-contact-night-state">RED // ENGAGED</small></span>
+      </div>
+      <div class="tile-contact-label tile-contact-label--aethel" id="tile-contact-aethel" aria-hidden="true">
+        <span class="tile-contact-dot"></span>
+        <span><b>AETHEL-01</b><small id="tile-contact-aethel-state">BLUE // DEFENSIVE</small></span>
       </div>
       <div class="hud hud-top">
         <div class="hud-brand">
