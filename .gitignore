@@ -8,7 +8,7 @@ dist/
 *.jpg
 *.jpeg
 qa-frames/
+qa-*/
 capture-video/
 video-capture-*/
 .DS_Store
-
